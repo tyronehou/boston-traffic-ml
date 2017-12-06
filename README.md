@@ -9,3 +9,5 @@
     * boston-neighborhoods
     * traffic-signals
 * **[Uber Movement](https://movement.uber.com/) weekly datasets**
+* **[ericfischer/traffic counts](https://github.com/ericfischer/kc-traffic-counts)**
+    * boston
