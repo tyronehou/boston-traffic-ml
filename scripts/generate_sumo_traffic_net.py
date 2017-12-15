@@ -104,69 +104,74 @@ def to_sumo_net(V, E):
 
     return nodes, edges
 
-# We take a small area of Boston bounded by the p1, p2, p3, & p4 (corresponding roughly to the area bounded by fenway, the Charles River, and Boston Commons)
-# geoql requires longitude then latitude
-p1 = [-71.090084, 42.351659]
-p2 = [-71.073152, 42.356235]
-p3 = [-71.070418, 42.351718]
-p4 = [-71.087829, 42.347133]
+def main():
+    # We take a small area of Boston bounded by the p1, p2, p3, & p4 (corresponding roughly to the area bounded by fenway, the Charles River, and Boston Commons)
+    # geoql requires longitude then latitude
+    p1 = [-71.090084, 42.351659]
+    p2 = [-71.073152, 42.356235]
+    p3 = [-71.070418, 42.351718]
+    p4 = [-71.087829, 42.347133]
 
-bounds = {
-    'features': [
-        {
-            'type':'Feature',
-            'geometry': {
-                'type':'Polygon',
-                'coordinates': [[p1, p2, p3, p4, p1]]
+    bounds = {
+        'features': [
+            {
+                'type':'Feature',
+                'geometry': {
+                    'type':'Polygon',
+                    'coordinates': [[p1, p2, p3, p4, p1]]
+                }
             }
-        }
-    ],
-    'type': 'FeatureCollection'
-}
-'''
-g = geoql.load(open(data_dir + 'example_extract.geojson', 'r'))
-g = g.keep_that_intersect(bounds)
-g.dump(open(data_dir + 'sumo_traffic_net.geojson', 'w'))
-open('leaflet_sumo.html', 'w').write(geoleaflet.html(g)) # Create visualization.
-'''
-g = geoql.load(open(data_dir + 'sumo_traffic_net.geojson', 'r'))
-g = g.node_edge_graph()
+        ],
+        'type': 'FeatureCollection'
+    }
+    '''
+    g = geoql.load(open(data_dir + 'example_extract.geojson', 'r'))
+    g = g.keep_that_intersect(bounds)
+    g.dump(open(data_dir + 'sumo_traffic_net.geojson', 'w'))
+    open('leaflet_sumo.html', 'w').write(geoleaflet.html(g)) # Create visualization.
+    '''
+    g = geoql.load(open(data_dir + 'sumo_traffic_net.geojson', 'r'))
+    g = g.node_edge_graph()
 
-# Separate vertex and edge list
-# Also enlarge the distance between coordinates
-V, E = [], []
+    # Separate vertex and edge list
+    # Also enlarge the distance between coordinates
+    V, E = [], []
 
-distances = []
-for feature in g['features']:
-    if feature['type'] == 'Feature':
-        coords = feature['geometry']['coordinates']
-        for i in range(1, len(coords)):
-            x1, y1 = coords[i]
-            x2, y2 = coords[i-1]
-            dist = ((x2 - x1)**2 + (y2 - y1)**2)**0.5
-            if dist > 0:
-                distances.append(dist)
+    distances = []
+    for feature in g['features']:
+        if feature['type'] == 'Feature':
+            coords = feature['geometry']['coordinates']
+            for i in range(1, len(coords)):
+                x1, y1 = coords[i]
+                x2, y2 = coords[i-1]
+                dist = ((x2 - x1)**2 + (y2 - y1)**2)**0.5
+                if dist > 0:
+                    distances.append(dist)
 
 
-scale = 100 / min(distances)
-print(scale)
-for feature in g['features']:
-    if feature['type'] == 'Feature':
-        coords = feature['geometry']['coordinates']
-        for i, coord in enumerate(coords):
+    scale = 100 / min(distances)
+    print(scale)
 
-            coords[i] = (coord[0] * scale, coord[1] * scale)
-            
-        E.append(feature)
-    elif feature['type'] == 'Point':
-        coords = feature['coordinates']
-        feature['coordinates'] = (coords[0] * scale, coords[1] * scale)
-        V.append(feature)
-    else:
-        print('Invalid feature type {} in graph'.format(feature['type']))
+    for feature in g['features']:
+        if feature['type'] == 'Feature':
+            coords = feature['geometry']['coordinates']
+            for i, coord in enumerate(coords):
 
-# Convert to a sumo representation
-nodes, edges = to_sumo_net(V, E)
+                coords[i] = (coord[0] * scale, coord[1] * scale)
+                
+            E.append(feature)
+        elif feature['type'] == 'Point':
+            coords = feature['coordinates']
+            feature['coordinates'] = (coords[0] * scale, coords[1] * scale)
+            V.append(feature)
+        else:
+            print('Invalid feature type {} in graph'.format(feature['type']))
 
-nodes.write('../sumo_files/traffic_ml.nod.xml')
-edges.write('../sumo_files/traffic_ml.edg.xml')
+    # Convert to a sumo representation
+    nodes, edges = to_sumo_net(V, E)
+
+    nodes.write('../sumo_files/traffic_ml.nod.xml')
+    edges.write('../sumo_files/traffic_ml.edg.xml')
+
+if __name__ == '__main__':
+    main()
