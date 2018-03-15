@@ -32,13 +32,19 @@ import numpy as np
 # Define global tabular Q array
 S = 28 * 14 # EW * N queue length maxes
 A = 2
-N = 30000  # number of vehicles
+N = 10000  # number of vehicles
 Q = np.zeros((S, A))
 visits = []
-state_seq = []
+
 gamma = 0.9 # discount rate
 alpha = 0.1 # step size
 rewards_t = []
+
+LANEAREA_LENGTH = 200 # in meters
+c = 10 # cell size in meters
+NUM_LANES = 2
+# Array of intersection state maps
+state_rep = np.zeros((NUM_LANES*4, LANEAREA_LENGTH//c))
 
 debug = False
 # we need to import python modules from the $SUMO_HOME/tools directory
@@ -61,7 +67,6 @@ from traci import lanearea as la
 from traci import vehicle as veh
 from traci import trafficlight as tl
 
-
 def db(*args, **kwargs):
     if debug:
         print(*args, **kwargs)
@@ -69,11 +74,15 @@ def db(*args, **kwargs):
 def generate_routefile(N):
     random.seed(42)  # make tests reproducible
     # demand per second from different directions
-    pWE = 1. / 10
-    pEW = 1. / 11
     #pWE = 1. / 5
     #pEW = 1. / 5
+    pWE = 1. / 10
+    pEW = 1. / 11
     pNS = 1. / 20
+    pWE_end = 1. / 5
+    pEW_end = 1. / 5
+    pNS_end = 1. / 20
+
     with open("data/cross.rou.xml", "w") as routes:
         print("""<routes>
         <vType id="typeWE" accel="0.8" decel="4.5" sigma="0.5" length="5" minGap="2.5" maxSpeed="16.67" guiShape="passenger"/>
@@ -84,7 +93,7 @@ def generate_routefile(N):
         <route id="down" edges="54o 4i 3o 53i" />""", file=routes)
         lastVeh = 0
         vehNr = 0
-        for i in range(N):
+        for i in range(N//2):
             if random.uniform(0, 1) < pWE:
                 print('    <vehicle id="right_%i" type="typeWE" route="right" depart="%i" />' % (
                     vehNr, i), file=routes)
@@ -100,6 +109,23 @@ def generate_routefile(N):
                     vehNr, i), file=routes)
                 vehNr += 1
                 lastVeh = i
+        for i in range(N//2, N):
+            if random.uniform(0, 1) < pWE_end:
+                print('    <vehicle id="right_%i" type="typeWE" route="right" depart="%i" />' % (
+                    vehNr, i), file=routes)
+                vehNr += 1
+                lastVeh = i
+            if random.uniform(0, 1) < pEW_end:
+                print('    <vehicle id="left_%i" type="typeWE" route="left" depart="%i" />' % (
+                    vehNr, i), file=routes)
+                vehNr += 1
+                lastVeh = i
+            if random.uniform(0, 1) < pNS_end:
+                print('    <vehicle id="down_%i" type="typeNS" route="down" depart="%i" color="1,0,0"/>' % (
+                    vehNr, i), file=routes)
+                vehNr += 1
+                lastVeh = i
+
         print("</routes>", file=routes)
 
 # The program looks like this
@@ -137,8 +163,8 @@ def run():
 
 def cumHaltingNumber():
     cum_halt_num = 0
-    for det_id in traci.la.getIDList():
-        cum_halt_num += traci.la.getLastStepHaltingNumber(det_id)
+    for det_id in la.getIDList():
+        cum_halt_num += la.getLastStepHaltingNumber(det_id)
     return cum_halt_num
 
 def getCumulativeDelay():
@@ -151,21 +177,12 @@ def getCumulativeDelay():
     return delay
 
 def getState():
-    #EW = la.getLastStepOccupancy("0") + la.getLastStepOccupancy("1") 
-    #N = la.getLastStepOccupancy("2") + la.getLastStepOccupancy("3") 
-
-    #EW = int(np.floor(EW / 66))
-    #N = int(np.floor(N / 34))
-
+    DTSE()
+    
     EW = la.getLastStepHaltingNumber("0")
     EW += la.getLastStepHaltingNumber("1")
     N = la.getLastStepHaltingNumber("2")
     N += la.getLastStepHaltingNumber("3")
-
-    #EW = EW // 6
-    #print(N)
-    #N = N // 3
-    state_seq.append((EW, N))
 
     sm = stateMap(EW, N)
     visits.append((EW, N))
@@ -178,6 +195,21 @@ def getReward():
 def stateMap(EW, NS):
     return 28 * NS + EW
 
+def DTSE():
+    # Get all vehicles in the lanearea
+    # Given a list of relevant vehicles, convert it t
+    for det_id in la.getIDList():
+        det_len = la.getLength(det_id)
+        for vid in la.getLastStepVehicleIDs(det_id):
+            pos = veh.getLanePosition(vid)
+            print("Veh {}: {}".format(vid, pos))
+            
+            # Given position, change it to an index for a binary array
+            
+            #state_rep[] = 1
+            #state_rep = 
+
+
 # Use epsilon-greedy action selection
 def selectAction(state_idx, epsilon):
     seed = np.random.random()
@@ -185,14 +217,47 @@ def selectAction(state_idx, epsilon):
         return np.random.choice(A, 1)[0]
     else: # select greedy action
         return np.argmax(Q[state_idx])
-    
 
 def fixed():
     tl.setPhase("0", 2)
+    getState()
     while traci.simulation.getMinExpectedNumber() > 0:
         traci.simulationStep()
+        getState()
         r = getReward()
         rewards_t.append(r)
+
+def myfixed(greentime, yellowtime):
+    tl.setPhase("0", 2)
+    getState()
+    while traci.simulation.getMinExpectedNumber() > 0:
+        for i in range(greentime):
+            traci.simulationStep()
+            tl.setPhase("0", 2)
+            getState()
+            r = getReward()
+            rewards_t.append(r)
+
+        for i in range(yellowtime):
+            traci.simulationStep()
+            tl.setPhase("0", 3)
+            getState()
+            r = getReward()
+            rewards_t.append(r)
+ 
+        for i in range(greentime):
+            traci.simulationStep()
+            tl.setPhase("0", 0)
+            getState()
+            r = getReward()
+            rewards_t.append(r)
+ 
+        for i in range(yellowtime):
+            traci.simulationStep()
+            tl.setPhase("0", 1)
+            getState()
+            r = getReward()
+            rewards_t.append(r)
 
 def qlearn(epsilon, load_from_file=None, learn=True, anneal=False):
     print("File beginning", flush=True)
@@ -261,15 +326,12 @@ def load_Q_values(fname):
     return np.loadtxt(fname)
 
 def save_output(fname, episode=None):
-    if episode:
-        print("In:", episode)
+    if episode is not None:
         np.savetxt('{}_episode{}_rewards'.format(args.saverewards, episode), rewards_t)
         np.savetxt('{}_episode{}_visits'.format(args.saverewards, episode), visits)
-        np.savetxt('{}_episode{}_states'.format(args.saverewards, episode), state_seq)
     else:
         np.savetxt('{}_rewards'.format(args.saverewards), rewards_t)
         np.savetxt('{}_visits'.format(args.saverewards), visits)
-        np.savetxt('{}_states'.format(args.saverewards), state_seq)
 
 def get_arguments():
     argParser = argparse.ArgumentParser()
@@ -300,12 +362,27 @@ if __name__ == "__main__":
         
     if args.method == 'ql':
         print('Using epsilon-greedy Qlearning controller')
+        # this is the normal way of using traci. sumo is started as a
+        # subprocess and then the python script connects and runs
+        traci.start([sumoBinary, "-c", "data/cross.sumocfg",
+                                  "--tripinfo-output", "{}_tripinfo.xml".format(args.method),
+                                  "--error-log", "errors"])
+
+        qlearn(args.epsilon, args.loadfromfile, anneal=False) # don't load from file, do learn
+
+        if args.savetofile:
+            save_Q_values(args.savetofile)
+        if args.saverewards:
+            save_output(args.saverewards)
+
+    elif args.method == 'qle':
+        print('Using epsilon-greedy Qlearning controller')
         episodes = 10
         for i in range(episodes):
             # this is the normal way of using traci. sumo is started as a
             # subprocess and then the python script connects and runs
             traci.start([sumoBinary, "-c", "data/cross.sumocfg",
-                                      "--tripinfo-output", args.method + "episode" + str(i) + "_tripinfo.xml",
+                                      "--tripinfo-output", "{}episode{}_tripinfo.xml".format(args.method, str(i)),
                                       "--error-log", "errors"])
 
             print("Starting episode", i)
@@ -314,30 +391,46 @@ if __name__ == "__main__":
                     args.loadfromfile += "_epsiode" + str(i-1)
                 else:
                     args.loadfromfile = None
-            
+        
             qlearn(args.epsilon, args.loadfromfile, anneal=True) # don't load from file, do learn
 
             if args.savetofile:
-                save_Q_values(args.savetofile + '_episode' + str(i))
+                save_Q_values('{}_episode{}'.format(args.savetofile, str(i)))
             if args.saverewards:
-                print("save:", i)
                 save_output(args.saverewards, i)
-    else:
+    elif args.method == 'f':
+        # this is the normal way of using traci. sumo is started as a
+        # subprocess and then the python script connects and runs
+        min_green_time = 10
+        max_green_time = 60
+        #min_green_time = 25
+        #max_green_time = 25
+        inc = 5
+        for gt in range(min_green_time, max_green_time+1, inc):
+            _gt = gt
+            traci.start([sumoBinary, "-c", "data/cross.sumocfg",
+                                     "--tripinfo-output", "{}green={}_tripinfo.xml".format(args.method, _gt),
+                                     "--error-log", "errors"])
+            
+            print('Used fixed controller with cycle ({0},{1},{0},{1})'.format(gt, 6))
+            myfixed(_gt, 6)
+            if args.saverewards:
+                save_output(args.saverewards, _gt)
+
+    elif args.method == 'qg':
+        print('Using greedy Q-learning controller')
+
         # this is the normal way of using traci. sumo is started as a
         # subprocess and then the python script connects and runs
         traci.start([sumoBinary, "-c", "data/cross.sumocfg",
-                                 "--tripinfo-output", args.method + "_tripinfo.xml",
-                                 "--error-log", "errors"])
-        if args.method == 'f':
-            print('Used fixed controller')
-            fixed()
-        elif args.method == 'qg':
-            print('Using greedy Q-learning controller')
-            qlearn(0, args.loadfromfile, learn=False)
-            # Truly greedy should actually be zero
-        else:
-            print('Invalid method selected')
+                                  "--tripinfo-output", "{}_tripinfo.xml".format(args.method),
+                                  "--error-log", "errors"])
+
+        qlearn(0, args.loadfromfile, learn=False)
+        # Truly greedy should actually be zero
         if args.saverewards:
             save_output(args.saverewards)
-
+    else:
+        print('Invalid method selected')
+            
     exit(0)

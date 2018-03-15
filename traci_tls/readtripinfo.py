@@ -24,17 +24,17 @@ def parse_xml(fname):
         root = ET.fromstring(output_xml)
     return root
 
-def get_loss(root):
+def get_cum_attrib(root, attrib):
     cum_time_loss = 0
     for vehicle in root.getchildren():
-        cum_time_loss += float(vehicle.attrib["timeLoss"])
+        cum_time_loss += float(vehicle.attrib[attrib])
     
     return cum_time_loss
 
-def get_avg_delay(root):
+def get_avg_attrib(root, attrib):
     avg_time_loss = 0
     for vehicle in root.getchildren():
-        avg_time_loss += float(vehicle.attrib["timeLoss"])
+        avg_time_loss += float(vehicle.attrib[attrib])
     return avg_time_loss / len(root.getchildren())
     
 def countTypes(root, attrib):
@@ -45,7 +45,23 @@ def countTypes(root, attrib):
         d[t] += 1
     return d
 
+def cumTravelTime(root):
+    travel_time = 0.
+    for vehicle in root.getchildren():
+        travel_time +=  float(vehicle.attrib["arrival"]) - float(vehicle.attrib["depart"])
+    return travel_time
+
+def avgTravelTime(root):
+    travel_time = 0.
+    for vehicle in root.getchildren():
+        travel_time +=  float(vehicle.attrib["arrival"]) - float(vehicle.attrib["depart"])
+    return travel_time / len(root.getchildren())
+
 if __name__ == '__main__':
     args = get_arguments()
-    print(get_loss(args.fname))
-    print(get_avg_delay(args.fname))
+    root = parse_xml(args.fname)
+    print(avgTravelTime(root))
+    print(cumTravelTime(root))
+ 
+    #print(get_loss(root))
+    #print(get_avg_delay(root))
