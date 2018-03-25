@@ -29,7 +29,7 @@ def window(lst, winlen, f):
 #d1mean = window(d1, 1000, np.mean)
 
 
-episodes = 10
+episodes = 30
 #for i in range(2, episodes):
 #    visits = np.loadtxt('qlearn_delay_episode{}_visits'.format(i))
 #    d = {}
@@ -55,23 +55,52 @@ episodes = 10
 #    plt.hist2d(visits[:, 0], visits[:, 1], bins=(28, 14))
 #    plt.savefig('qlearn_delay_episode{}_histogram'.format(i))
 
-result_dir = 'results_10_11_20'
-result_dir = 'results_qew=.2'
+#result_dir = 'results_10_11_20'
+#result_dir = 'results101120_050520'
+#result_dir = 'results_qew=.2'
 result_dir = '.'
+#result_dir = 'results101120_050520_episodes=200'
 print('Qlearn')
-#for i in range(2, episodes):  
-#    root_i = parse_xml('{}/qleepisode{}_tripinfo.xml'.format(result_dir, i)) 
-#    print('Episode', i)
-#    print('Cumulative Time Loss {}:'.format(i), get_cum_attrib(root_i, "timeLoss"))
-#    print('Average Time Loss {}:'.format(i), get_avg_attrib(root_i, "timeLoss"))
-#    print('Cumulative Travel Time:', cumTravelTime(root_i))
-#    print('Average Travel Time:', avgTravelTime(root_i))
+lst = []
+for i in range(episodes):  
+    try:
+        root_i = parse_xml('{}/qleepisode{}_tripinfo.xml'.format(result_dir, i)) 
+    except FileNotFoundError:
+        print("File not found")
+        continue
 
-root = parse_xml('{}/ql_tripinfo.xml'.format(result_dir))
-print('Cumulative Time Loss:', get_cum_attrib(root, "timeLoss"))
-print('Average Time Loss:', get_avg_attrib(root, "timeLoss"))
-print('Cumulative Travel Time:', cumTravelTime(root))
-print('Average Travel Time:', avgTravelTime(root))
+    print('Episode', i)
+    print('Cumulative Time Loss {}:'.format(i), get_cum_attrib(root_i, "timeLoss"))
+    print('Average Time Loss {}:'.format(i), get_avg_attrib(root_i, "timeLoss"))
+    print('Cumulative Travel Time:', cumTravelTime(root_i))
+    print('Average Travel Time:', avgTravelTime(root_i))
+    lst.append(avgTravelTime(root_i))
+
+print('Deep Q learn')
+lst = []
+for i in range(episodes):  
+    try:
+        root_i = parse_xml('{}/dql_episode{}_tripinfo.xml'.format(result_dir, i)) 
+    except FileNotFoundError:
+        print("File not found")
+        continue
+
+    print('Episode', i)
+    print('Cumulative Time Loss {}:'.format(i), get_cum_attrib(root_i, "timeLoss"))
+    print('Average Time Loss {}:'.format(i), get_avg_attrib(root_i, "timeLoss"))
+    print('Cumulative Travel Time:', cumTravelTime(root_i))
+    print('Average Travel Time:', avgTravelTime(root_i))
+    lst.append(avgTravelTime(root_i))
+
+
+
+#plt.plot(lst)
+#plt.show(lst)
+##root = parse_xml('{}/ql_tripinfo.xml'.format(result_dir))
+#print('Cumulative Time Loss:', get_cum_attrib(root, "timeLoss"))
+#print('Average Time Loss:', get_avg_attrib(root, "timeLoss"))
+#print('Cumulative Travel Time:', cumTravelTime(root))
+#print('Average Travel Time:', avgTravelTime(root))
 
 print('FIXED')
 for i in range(10, 60, 5):

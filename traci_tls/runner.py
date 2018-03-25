@@ -28,25 +28,31 @@ import argparse
 import subprocess
 import random
 import numpy as np
+from tabular_ql import QLC
+from dtc import ReplayMemory, DTC, optimize_model
+import torch
+import torch.optim as optim
+from tensorboardX import SummaryWriter
 
-# Define global tabular Q array
-S = 28 * 14 # EW * N queue length maxes
+S = 28 * 14 * 4# EW * N queue length maxes
+#S = 28 * 14
 A = 2
 N = 10000  # number of vehicles
-Q = np.zeros((S, A))
 visits = []
+vehicles_in_queue = {} # maps vehicles to the time they entered the queue
 
-gamma = 0.9 # discount rate
+gamma = 0.7 # discount rate
 alpha = 0.1 # step size
 rewards_t = []
 
-LANEAREA_LENGTH = 200 # in meters
-c = 10 # cell size in meters
-NUM_LANES = 2
-# Array of intersection state maps
-state_rep = np.zeros((NUM_LANES*4, LANEAREA_LENGTH//c))
+LANEAREA_LENGTH = 200 # in meters DON"T FORGET TO CHANGE IF DET2 CHANGES
+NUM_LANES = 1 # we only track the incoming lanes
+c = 8 # cell size in meters
+num_cells = int(np.ceil(LANEAREA_LENGTH / c)) # number of cells 
+beta = 0.001 # target net parameter update rate
 
 debug = False
+
 # we need to import python modules from the $SUMO_HOME/tools directory
 try:
     #sys.path.append(os.path.join(os.path.dirname(
@@ -64,20 +70,23 @@ except ImportError:
 
 import traci
 from traci import lanearea as la
+from traci import lane
 from traci import vehicle as veh
 from traci import trafficlight as tl
+from traci import simulation as sim
 
 def db(*args, **kwargs):
     if debug:
         print(*args, **kwargs)
 
+# Make this read route config file
 def generate_routefile(N):
     random.seed(42)  # make tests reproducible
     # demand per second from different directions
     #pWE = 1. / 5
     #pEW = 1. / 5
     pWE = 1. / 10
-    pEW = 1. / 11
+    pEW = 1. / 10
     pNS = 1. / 20
     pWE_end = 1. / 5
     pEW_end = 1. / 5
@@ -137,29 +146,6 @@ def generate_routefile(N):
 #        <phase duration="6"  state="ryry"/>
 #    </tlLogic>
 
-def run():
-    """execute the TraCI control loop"""
-        # we start with phase 2 where EW has green
-    tl.setPhase("0", 2)
-    i = 2
-    while traci.simulation.getMinExpectedNumber() > 0:
-        traci.simulationStep()
-        print("E:", la.getLastStepHaltingNumber("0"))
-        print("N:", la.getLastStepHaltingNumber("1"))
-        # Get occupancy of East lane
-        #print(traci.lane.getLastStepOccupancy("2i_0"))
-        if tl.getPhase("0") == 2:
-            # we are not already switching
-            if traci.inductionloop.getLastStepVehicleNumber("0") > 0:
-                # there is a vehicle from the north, switch
-                tl.setPhase("0", 3)
-            else:
-                # otherwise try to keep green for EW
-                tl.setPhase("0", 2)
-        
-    traci.close()
-    sys.stdout.flush()
-
 
 def cumHaltingNumber():
     cum_halt_num = 0
@@ -176,52 +162,141 @@ def getCumulativeDelay():
 
     return delay
 
+def getTimeInQueue():
+    t = sim.getCurrentTime() / 1000
+    cumTime = 0
+    for det_id in la.getIDList():
+        for vid in la.getLastStepVehicleIDs(det_id):
+            print('vid in getTimeinQueue:',vid)
+            start = vehicles_in_queue.setdefault(vid, t)
+            cumTime += t - vehicles_in_queue[vid]
+    print(vehicles_in_queue)
+    print(cumTime)
+    return cumTime
+
 def getState():
-    DTSE()
-    
+    #EW = len(la.getLastStepVehicleIDs("0"))#.getLastStepHaltingNumber("0")
+    #EW += len(la.getLastStepVehicleIDs("1"))#.getLastStepHaltingNumber("1")
+    #N = len(la.getLastStepVehicleIDs("2"))#.getLastStepHaltingNumber("2")
+    #N += len(la.getLastStepVehicleIDs("3"))#.getLastStepHaltingNumber("3")
     EW = la.getLastStepHaltingNumber("0")
     EW += la.getLastStepHaltingNumber("1")
     N = la.getLastStepHaltingNumber("2")
     N += la.getLastStepHaltingNumber("3")
 
-    sm = stateMap(EW, N)
+    phase = tl.getPhase("0") % 2 # only in this case, for four phases
+    db('State:', EW, N)
+    sm = stateMap(EW, N, phase)
     visits.append((EW, N))
     return sm
- 
-def getReward():
-    return -getCumulativeDelay()
-    #return -cumHaltingNumber()
 
-def stateMap(EW, NS):
-    return 28 * NS + EW
-
-def DTSE():
+def getDTSE():
     # Get all vehicles in the lanearea
     # Given a list of relevant vehicles, convert it t
-    for det_id in la.getIDList():
-        det_len = la.getLength(det_id)
-        for vid in la.getLastStepVehicleIDs(det_id):
-            pos = veh.getLanePosition(vid)
-            print("Veh {}: {}".format(vid, pos))
-            
-            # Given position, change it to an index for a binary array
-            
-            #state_rep[] = 1
-            #state_rep = 
+    # Array of intersection state maps
 
+    DTSE_pos = np.zeros((NUM_LANES*4, num_cells)) 
+    DTSE_spd = np.zeros((NUM_LANES*4, num_cells)) 
+    for l, det_id in enumerate(la.getIDList()):
+        det_len = la.getLength(det_id)
+        lane_len = lane.getLength(la.getLaneID(det_id))
+
+        assert det_len == LANEAREA_LENGTH
+        for vid in la.getLastStepVehicleIDs(det_id):
+            # What is the correct encoding of pos to cell? Should low indices specify cars close or far away for traffic light?
+            #print('lid',veh.getLanePosition(vid))
+            pos = LANEAREA_LENGTH - lane_len + veh.getLanePosition(vid)
+            if pos < 0:
+                continue
+            cell = int(min(pos // c, num_cells)) # in case pos ends up being exactly the length of the detector
+            
+            speed = veh.getSpeed(vid)
+            #print("Veh {}: {}".format(vid, pos))
+            #print('cell',cell)
+ 
+            # Record binary position and speed arrays
+            DTSE_pos[l][cell] = 1
+            DTSE_spd[l][cell] = speed
+
+    phase = int(tl.getPhase("0")) % 2
+    signal_state = torch.zeros(1, A).float()
+    signal_state[0][phase] = 1
+    
+    # Add batch dimension and input filter dimensions to state vectors
+    DTSE_pos = torch.from_numpy(DTSE_pos).unsqueeze(0).unsqueeze(0).float()
+    DTSE_spd = torch.from_numpy(DTSE_spd).unsqueeze(0).unsqueeze(0).float()
+    return DTSE_pos, DTSE_spd, signal_state
+ 
+def numVehicles():
+    vehicles = 0
+    for l, det_id in enumerate(la.getIDList()):
+        vehicles += len(la.getLastStepVehicleIDs(det_id))
+    return vehicles
+
+def getReward():
+    #return -getTimeInQueue()
+    return -getCumulativeDelay()
+    # Try normalizing the reward and using queue length again
+    #return -cumHaltingNumber()
+
+def stateMap(EW, NS, phase):
+    # What if we decrease the state space size:
+    # Consider only every four cars or so
+    #return  NS + EW // 4
+    return 28 * 2 * NS + EW# + phase
 
 # Use epsilon-greedy action selection
-def selectAction(state_idx, epsilon):
+def select_action(state_idx, epsilon):
     seed = np.random.random()
     if seed < epsilon: # select random actions
         return np.random.choice(A, 1)[0]
     else: # select greedy action
         return np.argmax(Q[state_idx])
 
+def step():
+    ''' Wrapper for traci simulation step'''
+    traci.simulationStep()
+
+    # Assume we have a list of vehicles in queue at last time step: last
+    # We now have list of vehicles in queue at current time step: cur
+    # For each vehicle in cur but not last, update time in queue
+    # For each vehicle in last but not cur, don't do anything...
+    # Update list of vehicles in queue
+    #t = sim.getCurrentTime() // 1000 # Current time in seconds
+    #for det_id in la.getIDList():
+    #    for vid in la.getLastStepVehicleIDs(det_id):
+    #        start = vehicles_in_queue.setdefault(vid, t)
+    #        vehicles_in_queue[vid] = t - start
+ 
+
+# NOT USING RN
+def inductionloop():
+    """execute the TraCI control loop"""
+        # we start with phase 2 where EW has green
+    tl.setPhase("0", 2)
+    i = 2
+    while sim.getMinExpectedNumber() > 0:
+        traci.simulationStep()
+        print("E:", la.getLastStepHaltingNumber("0"))
+        print("N:", la.getLastStepHaltingNumber("1"))
+        # Get occupancy of East lane
+        #print(lane.getLastStepOccupancy("2i_0"))
+        if tl.getPhase("0") == 2:
+            # we are not already switching
+            if traci.inductionloop.getLastStepVehicleNumber("0") > 0:
+                # there is a vehicle from the north, switch
+                tl.setPhase("0", 3)
+            else:
+                # otherwise try to keep green for EW
+                tl.setPhase("0", 2)
+        
+    traci.close()
+    sys.stdout.flush()
+
 def fixed():
     tl.setPhase("0", 2)
     getState()
-    while traci.simulation.getMinExpectedNumber() > 0:
+    while sim.getMinExpectedNumber() > 0:
         traci.simulationStep()
         getState()
         r = getReward()
@@ -230,7 +305,7 @@ def fixed():
 def myfixed(greentime, yellowtime):
     tl.setPhase("0", 2)
     getState()
-    while traci.simulation.getMinExpectedNumber() > 0:
+    while sim.getMinExpectedNumber() > 0:
         for i in range(greentime):
             traci.simulationStep()
             tl.setPhase("0", 2)
@@ -259,72 +334,60 @@ def myfixed(greentime, yellowtime):
             r = getReward()
             rewards_t.append(r)
 
-def qlearn(epsilon, load_from_file=None, learn=True, anneal=False):
+def qlearn(model, learn=True):
     print("File beginning", flush=True)
-    global Q
-    if load_from_file:
-        Q = load_Q_values(load_from_file)
+    print(model.Q)    
     
     action_time = 12
-    traci.simulationStep()
+    step()#traci.simulationStep()
     tl.setPhase("0", 2)
     # Find current state
     s = getState()
-
+    
     i = 0
-    while traci.simulation.getMinExpectedNumber() > 0:
+    while sim.getMinExpectedNumber() > 0:
         # Take action 
         tl.setPhaseDuration("0", 10000)
-        a = selectAction(s, epsilon)
+        a = model(s)
 
         if a*2 != tl.getPhase("0"): # Change action
             db('Change to other green light')
             tl.setPhase("0", (tl.getPhase("0")+1) % 4)
             #print("phase:", tl.getPhase("0"))
-            yellow_time = (tl.getNextSwitch("0") - traci.simulation.getCurrentTime()) // 1000
+            yellow_time = (tl.getNextSwitch("0") - sim.getCurrentTime()) // 1000
         else:
             yellow_time = 0
 
-        #print('t:', traci.simulation.getCurrentTime() / 1000)
+        #if i % 100 == 0:
+        #    print('State idx:', s)
+        #    print("t:", sim.getCurrentTime() / 1000)
+        #    print("epsilon:", model.epsilon)
 
-        if i % 100 == 0:
-            print("t:", traci.simulation.getCurrentTime() / 1000)
-            print('epsilon:', epsilon)
         db('action:', a)
-        r = 0
+        db("-" * 10)
 
         # Move simulation forward one step and obtain reward
-        db(action_time + yellow_time)
-        for i in range(yellow_time + action_time):
-            traci.simulationStep()
+        #db(action_time + yellow_time)
+        for j in range(yellow_time + action_time):
+            step()#traci.simulationStep()
             # Get some kind of reward signal from the E2 loops
             # Let's say its negative of the number of cars on the loop
-            r += getReward()#-cumHaltingNumber()
-            rewards_t.append(r)
-
-            if traci.simulation.getMinExpectedNumber() <= 0:
+            
+            if sim.getMinExpectedNumber() <= 0:
                 return
-        
+        r = getReward()#-cumHaltingNumber()
+        rewards_t.append(r)
+ 
         db("reward:", r)
         s_ = getState()
 
         if learn:
-            # update Q function according to the Q-learning rule
-            # Maybe try Sarsa and Expected Sarsa at some point
-            Q[s][a] += alpha * (r + gamma * np.max(Q[s_][a]) - Q[s][a])
-
-            if anneal:
-                epsilon -= epsilon * i / N
-                i += 1
+            db('Before:', s, model.Q[s])
+            model.update(s, a, r, s_, alpha)
+            db('After:', s, model.Q[s])
+            i += 1
         s = s_
-        db("-" * 10)
-
-def save_Q_values(fname):
-    np.savetxt(fname, Q)
-
-def load_Q_values(fname):
-    return np.loadtxt(fname)
-
+        
 def save_output(fname, episode=None):
     if episode is not None:
         np.savetxt('{}_episode{}_rewards'.format(args.saverewards, episode), rewards_t)
@@ -333,6 +396,70 @@ def save_output(fname, episode=None):
         np.savetxt('{}_rewards'.format(args.saverewards), rewards_t)
         np.savetxt('{}_visits'.format(args.saverewards), visits)
 
+# Need to write a better framework for putting in models
+def deepqlearn(model, target, beta, writer=None, learn=True):
+    # Same as q learning
+    # Get traffic state (from DTSE this time)
+    # Perform action, get reward
+    # Store transition in replay memory
+    # Get next state
+    # Now perform the update loop
+    print("File beginning", flush=True)
+
+    # Initialize deep traffic controller
+    # Memory capacity is num timesteps for 1.5 hours over 200 episodes = 1.5 * 3600 * 200 = 108000
+    # For now anyway
+    action_time = 12
+    step()
+    tl.setPhase("0", 2)
+    # Find current state
+    s = getDTSE()
+    db('state:', s)
+    n_action_cycle = 0
+    while sim.getMinExpectedNumber() > 0:
+        # Take action 
+        tl.setPhaseDuration("0", 10000)
+        a = model.select_action(s)
+
+        if a[0, 0]*2 != tl.getPhase("0"): # Change action
+            db('Change to other green light')
+            tl.setPhase("0", (tl.getPhase("0")+1) % 4)
+            #print("phase:", tl.getPhase("0"))
+            yellow_time = (tl.getNextSwitch("0") - sim.getCurrentTime()) // 1000
+        else:
+            yellow_time = 0
+
+        #print('t:', sim.getCurrentTime() / 1000)
+
+        if n_action_cycle % 100 == 0:
+            print("t:", sim.getCurrentTime() / 1000)
+            print('epsilon:', model.epsilon)
+        db('action:', a)
+        r = 0
+
+        # Move simulation forward one step and obtain reward
+        db(action_time + yellow_time)
+        db("-" * 10)
+        for j in range(yellow_time + action_time):
+            step()
+            rewards_t.append(r)
+            if sim.getMinExpectedNumber() <= 0:
+                return
+        r = getReward()
+        if writer:
+            writer.add_scalar("data/reward", r, n_action_cycle)
+        db("reward:", r)
+
+        s_ = getDTSE()
+        db("next state:", s_)
+        if learn:
+            # Add transition to replay memory
+            # TODO: Make sure s, a, r, and s_ are Tensors this time
+            model.memory.push(s, a, torch.Tensor([r]), s_)
+            optimize_model(model, target, gamma, beta, writer=writer)
+            n_action_cycle += 1
+        s = s_
+        
 def get_arguments():
     argParser = argparse.ArgumentParser()
     argParser.add_argument("--nogui", action="store_true",
@@ -342,6 +469,7 @@ def get_arguments():
     argParser.add_argument("--savetofile")
     argParser.add_argument("--method")
     argParser.add_argument("--epsilon", type=float, default=0.0)
+    argParser.add_argument("--episodes", type=int)
 
     args = argParser.parse_args()
     return args
@@ -367,22 +495,29 @@ if __name__ == "__main__":
         traci.start([sumoBinary, "-c", "data/cross.sumocfg",
                                   "--tripinfo-output", "{}_tripinfo.xml".format(args.method),
                                   "--error-log", "errors"])
+        # Initialize qlearn class
+        print('loadfromfile in main:',args.loadfromfile)
+        model = QLC(S, A, epsilon=args.epsilon, gamma=gamma, anneal=False, anneal_steps=N//36, loadQ=args.loadfromfile)
 
-        qlearn(args.epsilon, args.loadfromfile, anneal=False) # don't load from file, do learn
+        qlearn(model) # don't load from file, do learn
 
         if args.savetofile:
-            save_Q_values(args.savetofile)
+            model.save_Q_values(args.savetofile)
         if args.saverewards:
             save_output(args.saverewards)
 
     elif args.method == 'qle':
         print('Using epsilon-greedy Qlearning controller')
-        episodes = 10
+        episodes = args.episodes
+
+        model = QLC(S, A, epsilon=args.epsilon, gamma=gamma, anneal=True, anneal_steps=N//36, loadQ=args.loadfromfile)
         for i in range(episodes):
+            visits = []
+            rewards_t = []
             # this is the normal way of using traci. sumo is started as a
             # subprocess and then the python script connects and runs
             traci.start([sumoBinary, "-c", "data/cross.sumocfg",
-                                      "--tripinfo-output", "{}episode{}_tripinfo.xml".format(args.method, str(i)),
+                                      "--tripinfo-output", "{}_episode{}_tripinfo.xml".format(args.method, str(i)),
                                       "--error-log", "errors"])
 
             print("Starting episode", i)
@@ -391,20 +526,20 @@ if __name__ == "__main__":
                     args.loadfromfile += "_epsiode" + str(i-1)
                 else:
                     args.loadfromfile = None
-        
-            qlearn(args.epsilon, args.loadfromfile, anneal=True) # don't load from file, do learn
+            
+            qlearn(model) # don't load from file, do learn
 
             if args.savetofile:
-                save_Q_values('{}_episode{}'.format(args.savetofile, str(i)))
+                model.save_Q_values('{}_episode{}'.format(args.savetofile, str(i)))
             if args.saverewards:
                 save_output(args.saverewards, i)
     elif args.method == 'f':
         # this is the normal way of using traci. sumo is started as a
         # subprocess and then the python script connects and runs
-        min_green_time = 10
-        max_green_time = 60
-        #min_green_time = 25
-        #max_green_time = 25
+        #min_green_time = 10
+        #max_green_time = 60
+        min_green_time = 40 
+        max_green_time = 40
         inc = 5
         for gt in range(min_green_time, max_green_time+1, inc):
             _gt = gt
@@ -426,10 +561,44 @@ if __name__ == "__main__":
                                   "--tripinfo-output", "{}_tripinfo.xml".format(args.method),
                                   "--error-log", "errors"])
 
-        qlearn(0, args.loadfromfile, learn=False)
-        # Truly greedy should actually be zero
+        model = QLC(S, A, epsilon=args.epsilon, gamma=gamma, anneal_steps=N//18, loadQ=args.loadfromfile)
+        qlearn(model, learn=False)
+
         if args.saverewards:
             save_output(args.saverewards)
+    elif args.method == 'dql':
+        print('Using Deep q-learning traffic controller')
+        # this is the normal way of using traci. sumo is started as a
+        # subprocess and then the python script connects and runs
+        model = DTC(c * num_cells * NUM_LANES * 4, A, epsilon=args.epsilon, capacity=100000, batch_size=32)
+        target = DTC(c * num_cells * NUM_LANES * 4, A)
+
+        if args.loadfromfile is not None:
+            state_dict = torch.load(args.loadfromfile)
+            model.load_state_dict(state_dict["model"])
+            target.load_state_dict(state_dict["target"])
+            model.optimizer.load_state_dict(state_dict["optim"])
+
+        # Init tensorboard summary writer
+        writer = SummaryWriter()
+        episodes = args.episodes
+        
+        for i in range(episodes):
+            traci.start([sumoBinary, "-c", "data/cross.sumocfg",
+                                  "--tripinfo-output", "{}_episode{}_tripinfo.xml".format(args.method, i),
+                                  "--error-log", "errors"])
+
+            deepqlearn(model, target, beta, writer=writer, learn=True)
+            if args.savetofile:
+                state = {
+                    'model' : model.state_dict(),
+                    'optim' : model.optimizer.state_dict(),
+                    'target': target.state_dict()
+                }
+                torch.save(state, "{}_episode{}.pt".format(args.savetofile, i))
+                # TODO: SAVE net parameters TO FILE
+            if args.saverewards:
+                save_output(args.saverewards)
     else:
         print('Invalid method selected')
             
