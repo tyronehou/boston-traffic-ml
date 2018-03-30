@@ -23,7 +23,7 @@ class QLC:
         self.gamma = gamma
         print('model loadQ:', loadQ)
         if loadQ != None:
-            self.Q = self.load_Q_values(loadQ)
+            self.Q = self.load_params(loadQ)
         else:
             self.Q = np.zeros((S, A))
 
@@ -36,15 +36,18 @@ class QLC:
         else: # select greedy action
             return np.argmax(self.Q[state_idx])
 
-    def update(self, s, a, r, s_, alpha=0.1):
+    def select_action(self, state_idx):
+        return self.__call__(state_idx)
+
+    def update(self, s, a, r, s_, *args, alpha=0.1, **kwargs):
         ''' alpha -- step size '''
         self.Q[s][a] += alpha * (r + self.gamma * np.max(self.Q[s_][a]) - self.Q[s][a])
         if self.anneal and self.i < self.steps:
             self.epsilon -= self.increment
             self.i += 1 
 
-    def load_Q_values(self, fname):
+    def load_params(self, fname):
         return np.loadtxt(fname)
 
-    def save_Q_values(self, fname):
+    def save_params(self, fname):
         np.savetxt(fname, self.Q) 

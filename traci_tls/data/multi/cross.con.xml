@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+<connections xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/connections_file.xsd">
+	<connection from="00_0i" to="0_1" />
+    <connection from="1_0" to="0_00o" />
+    <connection from="01_0i" to="0_3" />
+    <connection from="3_0" to="0_01o" />
+
+    <connection from="10_1i" to="1_2" />
+    <connection from="2_1" to="1_10o" />
+    <connection from="11_1i" to="1_0" />
+    <connection from="0_1" to="1_11o" />
+ 
+    <connection from="20_2i" to="2_3" />
+    <connection from="3_2" to="2_20o" />
+    <connection from="21_2i" to="2_1" />
+    <connection from="1_2" to="2_21o" />
+ 
+    <connection from="30_3i" to="3_0" />
+    <connection from="0_3" to="3_30o" />
+    <connection from="31_3i" to="3_2" />
+    <connection from="2_3" to="3_31o" />
+</connections>

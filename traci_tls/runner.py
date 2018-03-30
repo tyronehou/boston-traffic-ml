@@ -92,7 +92,7 @@ def generate_routefile(N):
     pEW_end = 1. / 5
     pNS_end = 1. / 20
 
-    with open("data/cross.rou.xml", "w") as routes:
+    with open("data/single/cross.rou.xml", "w") as routes:
         print("""<routes>
         <vType id="typeWE" accel="0.8" decel="4.5" sigma="0.5" length="5" minGap="2.5" maxSpeed="16.67" guiShape="passenger"/>
         <vType id="typeNS" accel="0.8" decel="4.5" sigma="0.5" length="7" minGap="3" maxSpeed="25" guiShape="bus"/>
@@ -492,7 +492,7 @@ if __name__ == "__main__":
         print('Using epsilon-greedy Qlearning controller')
         # this is the normal way of using traci. sumo is started as a
         # subprocess and then the python script connects and runs
-        traci.start([sumoBinary, "-c", "data/cross.sumocfg",
+        traci.start([sumoBinary, "-c", "data/single/cross.sumocfg",
                                   "--tripinfo-output", "{}_tripinfo.xml".format(args.method),
                                   "--error-log", "errors"])
         # Initialize qlearn class
@@ -543,7 +543,7 @@ if __name__ == "__main__":
         inc = 5
         for gt in range(min_green_time, max_green_time+1, inc):
             _gt = gt
-            traci.start([sumoBinary, "-c", "data/cross.sumocfg",
+            traci.start([sumoBinary, "-c", "data/single/cross.sumocfg",
                                      "--tripinfo-output", "{}green={}_tripinfo.xml".format(args.method, _gt),
                                      "--error-log", "errors"])
             
@@ -584,7 +584,7 @@ if __name__ == "__main__":
         episodes = args.episodes
         
         for i in range(episodes):
-            traci.start([sumoBinary, "-c", "data/cross.sumocfg",
+            traci.start([sumoBinary, "-c", "data/single/cross.sumocfg",
                                   "--tripinfo-output", "{}_episode{}_tripinfo.xml".format(args.method, i),
                                   "--error-log", "errors"])
 

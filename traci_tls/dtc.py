@@ -46,11 +46,11 @@ class ReplayMemory():
         return len(self.memory)
 
 # Deep traffic controller
-class DTC(nn.Module):
+class DNN(nn.Module):
     ''' Deep traffic controller '''
-    def __init__(self, input_size, A, capacity=10000, epsilon=0.1, batch_size=32):
+    def __init__(self, input_size, A, epsilon=0.1, batch_size=32):
         # Define conv and fully connected layers
-        super(DTC, self).__init__()
+        super(DNN, self).__init__()
         #TODO: try diff kernel sizes and strides
         # Layer 1 position conv - 16 filters w/ 4x4 kernel
         self.conv_pos1 = nn.Conv2d(1, 16, kernel_size=(2,2), stride=2)
@@ -75,7 +75,6 @@ class DTC(nn.Module):
 
         # Things related to neural net training that are not layers
         self.epsilon = epsilon
-        self.memory = ReplayMemory(capacity)
         self.batch_size = 32
         self.optimizer = optim.RMSprop(self.parameters())
 
@@ -105,20 +104,55 @@ class DTC(nn.Module):
         return self.out(X)
 
     def select_action(self, s):
+        ''' If greedy is True, the action selected ignores the epsilon value '''
         P, V, L = s
         seed = np.random.random()
         if seed < self.epsilon: # select random actions
             print('RANDOM ACTION:', seed)
-            return torch.LongTensor([[np.random.randint(2)]]) #np.random.choice(self.A, 1)[0]
+            return np.random.randint(2) #np.random.choice(self.A, 1)[0]
         else: # select greedy action
-            return self.__call__((Variable(P), Variable(V), Variable(L))).data.max(1)[1].view(1,1) # torch.max serves as both max and argmax
+            return self.__call__((Variable(P), Variable(V), Variable(L))).data.max(1)[1][0] # torch.max serves as both max and argmax
             
-def optimize_model(model, target, gamma, beta, writer=None):
-    if len(model.memory) < model.batch_size:
+class DTC:
+    def __init__(self, *args, capacity=10000, gamma=0.9, beta=0.1, **kwargs):
+        self.model = DNN(*args, **kwargs)
+        self.target = DNN(*args, **kwargs)
+        self.memory = ReplayMemory(capacity)
+        self.gamma = gamma
+        self.beta = beta
+
+    def select_action(self, s):
+        return self.model.select_action(s)
+    
+    def update(self, s, a, r, s_, *args, **kwargs):
+        # push memory
+        a = torch.LongTensor([[a]])
+        r = torch.Tensor([r])
+        self.memory.push(s, a, r, s_)
+        optimize_model(self.model, self.target, self.memory, self.gamma, self.beta)
+
+    def save_params(self, fname):
+        state = {
+            'model' : self.model.state_dict(),
+            'optim' : self.model.optimizer.state_dict(),
+            'target': self.target.state_dict(),
+            'memory': self.memory
+        }
+        torch.save(state, fname)
+
+    def load_params(self, fname):
+        state_dict = torch.load(fname)
+        self.model.load_state_dict(state_dict["model"])
+        self.model.optimizer.load_state_dict(state_dict["optim"])
+        self.target.load_state_dict(state_dict["target"])
+        self.memory = state_dict["memory"]
+
+def optimize_model(model, target, memory, gamma, beta, writer=None):
+    if len(memory) < model.batch_size:
         return
 
     # Get minibatch of sample transitions; paper uses 32
-    transitions = model.memory.sample(model.batch_size)
+    transitions = memory.sample(model.batch_size)
     batch = Transition(*zip(*transitions)) # Create transition batch
 
     state_batch = [Variable(torch.cat(x)) for x in zip(*batch.state)]

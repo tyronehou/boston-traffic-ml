@@ -1,0 +1,21 @@
+<additional>
+    <laneAreaDetector id="0_0W" lane="00_0i_0" pos="-200" length="200" file="cross.d2.out" tl="0" />
+    <laneAreaDetector id="0_1N" lane="01_0i_0" pos="-200" length="200" file="cross.d2.out" tl="0" />
+    <laneAreaDetector id="0_2E" lane="1_0_0" pos="-200" length="200" file="cross.d2.out" tl="0" />
+    <laneAreaDetector id="0_3S" lane="3_0_0" pos="-200" length="200" file="cross.d2.out" tl="0" />
+
+    <laneAreaDetector id="1_0W" lane="0_1_0" pos="-200" length="200" file="cross.d2.out" tl="1" />
+    <laneAreaDetector id="1_1N" lane="10_1i_0" pos="-200" length="200" file="cross.d2.out" tl="1" />
+    <laneAreaDetector id="1_2E" lane="11_1i_0" pos="-200" length="200" file="cross.d2.out" tl="1" />
+    <laneAreaDetector id="1_3S" lane="2_1_0" pos="-200" length="200" file="cross.d2.out" tl="1" />
+
+    <laneAreaDetector id="2_0W" lane="3_2_0" pos="-200" length="200" file="cross.d2.out" tl="2" />
+    <laneAreaDetector id="2_1N" lane="1_2_0" pos="-200" length="200" file="cross.d2.out" tl="2" />
+    <laneAreaDetector id="2_2E" lane="20_2i_0" pos="-200" length="200" file="cross.d2.out" tl="2" />
+    <laneAreaDetector id="2_3S" lane="21_2i_0" pos="-200" length="200" file="cross.d2.out" tl="2" />
+
+    <laneAreaDetector id="3_0W" lane="31_3i_0" pos="-200" length="200" file="cross.d2.out" tl="3" />
+    <laneAreaDetector id="3_1N" lane="0_3_0" pos="-200" length="200" file="cross.d2.out" tl="3" />
+    <laneAreaDetector id="3_2E" lane="2_3_0" pos="-200" length="200" file="cross.d2.out" tl="3" />
+    <laneAreaDetector id="3_3S" lane="30_3i_0" pos="-200" length="200" file="cross.d2.out" tl="3" />
+</additional>

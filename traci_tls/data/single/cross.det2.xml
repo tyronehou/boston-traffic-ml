@@ -1,0 +1,6 @@
+<additional>
+    <laneAreaDetector id="1W" lane="1i_0" pos="-200" length="200" file="cross.d2.out" tl="0" />
+    <laneAreaDetector id="2E" lane="2i_0" pos="-200" length="200" file="cross.d2.out" tl="0" />
+    <laneAreaDetector id="3S" lane="3i_0" pos="-200" length="200" file="cross.d2.out" tl="0" />
+    <laneAreaDetector id="4N" lane="4i_0" pos="-200" length="200" file="cross.d2.out" tl="0" />
+</additional>

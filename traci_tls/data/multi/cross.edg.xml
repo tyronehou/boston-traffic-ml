@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<edges xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/edges_file.xsd">
+    <edge id="0_1" from="0" to="1" priority="78" numLanes="1" speed="19.444" />
+    <edge id="1_0" from="1" to="0" priority="78" numLanes="1" speed="19.444" />
+
+    <edge id="1_2" from="1" to="2" priority="78" numLanes="1" speed="19.444" />
+    <edge id="2_1" from="2" to="1" priority="78" numLanes="1" speed="19.444" />
+
+    <edge id="2_3" from="2" to="3" priority="78" numLanes="1" speed="19.444" />
+    <edge id="3_2" from="3" to="2" priority="78" numLanes="1" speed="19.444" />
+
+    <edge id="3_0" from="3" to="0" priority="78" numLanes="1" speed="19.444" />
+    <edge id="0_3" from="0" to="3" priority="78" numLanes="1" speed="19.444" />
+ 
+    <edge id="00_0i" from="00" to="0" priority="78" numLanes="1" speed="19.444" />
+    <edge id="0_00o" from="0" to="00" priority="46" numLanes="1" speed="11.111" />
+
+    <edge id="01_0i" from="01" to="0" priority="78" numLanes="1" speed="19.444" />
+    <edge id="0_01o" from="0" to="01" priority="46" numLanes="1" speed="11.111" />
+
+    <edge id="10_1i" from="10" to="1" priority="78" numLanes="1" speed="19.444" />
+    <edge id="1_10o" from="1" to="10" priority="46" numLanes="1" speed="11.111" />
+
+    <edge id="11_1i" from="11" to="1" priority="78" numLanes="1" speed="19.444" />
+    <edge id="1_11o" from="1" to="11" priority="46" numLanes="1" speed="11.111" />
+ 
+    <edge id="20_2i" from="20" to="2" priority="78" numLanes="1" speed="19.444" />
+    <edge id="2_20o" from="2" to="20" priority="46" numLanes="1" speed="11.111" />
+    
+    <edge id="21_2i" from="21" to="2" priority="78" numLanes="1" speed="19.444" />
+    <edge id="2_21o" from="2" to="21" priority="46" numLanes="1" speed="11.111" />
+    
+    <edge id="30_3i" from="30" to="3" priority="78" numLanes="1" speed="19.444" />
+    <edge id="3_30o" from="3" to="30" priority="46" numLanes="1" speed="11.111" />
+    
+    <edge id="31_3i" from="31" to="3" priority="78" numLanes="1" speed="19.444" />
+    <edge id="3_31o" from="3" to="31" priority="46" numLanes="1" speed="11.111" />
+</edges>

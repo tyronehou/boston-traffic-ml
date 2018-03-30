@@ -51,17 +51,23 @@ def cumTravelTime(root):
         travel_time +=  float(vehicle.attrib["arrival"]) - float(vehicle.attrib["depart"])
     return travel_time
 
-def avgTravelTime(root):
+def avgTravelTime(root, start=None, end=None):
     travel_time = 0.
-    for vehicle in root.getchildren():
-        travel_time +=  float(vehicle.attrib["arrival"]) - float(vehicle.attrib["depart"])
-    return travel_time / len(root.getchildren())
+    vehicles = root.getchildren()
+
+    if not start:
+        start = 0
+    if not end:
+        end = len(vehicles)
+    for vehicle in vehicles[start:end]:
+        travel_time += float(vehicle.attrib["arrival"]) - float(vehicle.attrib["depart"])
+    return travel_time / (end - start)
 
 if __name__ == '__main__':
     args = get_arguments()
     root = parse_xml(args.fname)
-    print(avgTravelTime(root))
-    print(cumTravelTime(root))
+    print('Average Travel Time:', avgTravelTime(root))
+    print('Cumulative Travel Time:', cumTravelTime(root))
  
     #print(get_loss(root))
     #print(get_avg_delay(root))

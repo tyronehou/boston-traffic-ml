@@ -55,16 +55,17 @@ episodes = 30
 #    plt.hist2d(visits[:, 0], visits[:, 1], bins=(28, 14))
 #    plt.savefig('qlearn_delay_episode{}_histogram'.format(i))
 
-#result_dir = 'results_10_11_20'
-#result_dir = 'results101120_050520'
-#result_dir = 'results_qew=.2'
+#result_dir = 'results/results_10_11_20'
+#result_dir = 'results/results101120_050520'
+#result_dir = 'results/results_qew=.2'
 result_dir = '.'
-#result_dir = 'results101120_050520_episodes=200'
+#result_dir = 'results/results101120_050520_episodes=200'
+#result_dir = 'results/results101020_050520_dqn'
 print('Qlearn')
 lst = []
-for i in range(episodes):  
+for i in range(1, episodes):  
     try:
-        root_i = parse_xml('{}/qleepisode{}_tripinfo.xml'.format(result_dir, i)) 
+        root_i = parse_xml('{}/ql_episode{}_tripinfo.xml'.format(result_dir, i)) 
     except FileNotFoundError:
         print("File not found")
         continue
@@ -75,10 +76,9 @@ for i in range(episodes):
     print('Cumulative Travel Time:', cumTravelTime(root_i))
     print('Average Travel Time:', avgTravelTime(root_i))
     lst.append(avgTravelTime(root_i))
-
 print('Deep Q learn')
 lst = []
-for i in range(episodes):  
+for i in range(1, episodes):  
     try:
         root_i = parse_xml('{}/dql_episode{}_tripinfo.xml'.format(result_dir, i)) 
     except FileNotFoundError:
@@ -92,18 +92,8 @@ for i in range(episodes):
     print('Average Travel Time:', avgTravelTime(root_i))
     lst.append(avgTravelTime(root_i))
 
-
-
-#plt.plot(lst)
-#plt.show(lst)
-##root = parse_xml('{}/ql_tripinfo.xml'.format(result_dir))
-#print('Cumulative Time Loss:', get_cum_attrib(root, "timeLoss"))
-#print('Average Time Loss:', get_avg_attrib(root, "timeLoss"))
-#print('Cumulative Travel Time:', cumTravelTime(root))
-#print('Average Travel Time:', avgTravelTime(root))
-
 print('FIXED')
-for i in range(10, 60, 5):
+for i in range(10, 61, 5):
     try:
         root = parse_xml('{}/fgreen={}_tripinfo.xml'.format(result_dir, i))
     except FileNotFoundError:
@@ -114,5 +104,3 @@ for i in range(10, 60, 5):
     print('Average Time Loss:', get_avg_attrib(root, "timeLoss")) 
     print('Cumulative Travel Time:', cumTravelTime(root))
     print('Average Travel Time:', avgTravelTime(root))
-
-    print('Ids:', countTypes(root, 'vType'))
