@@ -74,7 +74,7 @@ import traci
 from traci import lanearea as la
 from traci import lane
 from traci import vehicle as veh
-from traci import trafficlight as tl
+from traci import trafficlights as tl
 from traci import simulation as sim
 
 def db(*args, **kwargs):
