@@ -191,7 +191,7 @@ def generate_routefile(N, intersection, rho=1):
             for i in range(x, x+queue_segment["length"]):
                 for route_id, p in queue_segment.items():
                     if route_id != "length" and random.uniform(0, 1) < p:
-                        print('<vehicle id="{route_id}_{vehicle_num}" type="0" route="{route_id}" depart="{time}" />'.format(
+                        print('<vehicle id="{vehicle_num}" type="0" route="{route_id}" depart="{time}" />'.format(
                             route_id=route_id, vehicle_num=vehNr, time=i), file=f)
                         vehNr += 1
             x += queue_segment["length"]
@@ -258,7 +258,7 @@ def getDTSE(tls_id):
     # Get all vehicles in the lanearea
     # Given a list of relevant vehicles, convert it t
     # Array of intersection state maps
-
+    
     DTSE_pos = np.zeros((NUM_LANES*4, num_cells)) 
     DTSE_spd = np.zeros((NUM_LANES*4, num_cells)) 
     for l, lane_id in enumerate(tl.getControlledLanes(tls_id)):
@@ -436,7 +436,6 @@ def myfixed(greentime, yellowtime):
 
 def run(models, state_fn, action_time = 12, learn=True, writer=None):
     print("File beginning", flush=True)
-    
     tls_ids = tl.getIDList()
     step()#traci.simulationStep()
     s = [None for i in range(len(tls_ids))]
@@ -451,7 +450,12 @@ def run(models, state_fn, action_time = 12, learn=True, writer=None):
         # Find current states
         s[t] = state_fn(tls_id)
     
+    checkpoint = False
     while sim.getMinExpectedNumber() > 0:
+        if not checkpoint and "2000" in veh.getIDList():
+            writer.add_text("Rate switch", "Vehicle 2000 encountered", sim.getCurrentTime())
+            checkpoint = True
+
         for t, tls_id in enumerate(tls_ids):
             db("Phase duration for " + tls_id, tl.getPhaseDuration(tls_id))
             if next_action_times[t] > 0:
@@ -482,6 +486,7 @@ def run(models, state_fn, action_time = 12, learn=True, writer=None):
             step()#traci.simulationStep() 
             if sim.getMinExpectedNumber() <= 0:
                 return
+
         next_action_times -= step_size
         
         # Get some kind of reward signal from the E2 loops
