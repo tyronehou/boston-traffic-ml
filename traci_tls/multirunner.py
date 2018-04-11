@@ -32,6 +32,7 @@ import numpy as np
 from tabular_ql import QLC
 from dtc import ReplayMemory, DTC, optimize_model
 import torch
+from torch.autograd import Variable
 import torch.optim as optim
 from tensorboardX import SummaryWriter
 
@@ -42,10 +43,13 @@ LongTensor = torch.cuda.LongTensor if use_cuda else torch.LongTensor
 ByteTensor = torch.cuda.ByteTensor if use_cuda else torch.ByteTensor
 Tensor = FloatTensor
 
+simulation_params = {}
+
+ma = 1
 S = 28 * 14 * 4# EW * N queue length maxes
 #S = 28 * 14
 A = 2
-N = 10000  # number of vehicles
+N = 4000  # number of vehicles
 visits = []
 vehicles_in_queue = {} # maps vehicles to the time they entered the queue
 
@@ -60,6 +64,18 @@ num_cells = int(np.ceil(LANEAREA_LENGTH / c)) # number of cells
 beta = 0.001 # target net parameter update rate
 la_mapping = {} # mapping of lane ids to lanearea ids
 
+global_params = {
+ "state_space_size" : S,
+"action_space_size" : A,
+     "num_vehicles" : N,
+            "gamma" : gamma,
+            "alpha" : alpha,
+  "LANEAREA_LENGTH" : LANEAREA_LENGTH,
+        "NUM_LANES" : NUM_LANES,
+        "cell_size" : c, 
+        "num_cells" : num_cells,
+             "beta" : beta
+}
 debug = False
 
 # we need to import python modules from the $SUMO_HOME/tools directory
@@ -112,22 +128,38 @@ def generate_lanearea_mapping():
         print('lane:', l)
         la_mapping[l] = det_id
 
-def generate_routefile(N, intersection):
+def generate_routefile(N, intersection, rho=1):
     #random.seed(42)  # make tests reproducible
     # demand per second from different directions
+    # rho -- rate parameter
     if intersection == 's':
         route_file = "data/single/cross.rou.xml" 
-        queue_params = [OrderedDict(
+
+        '''queue_params = [OrderedDict(
             (
-                ("WE", 2. / 5),
-                ("EW", 2. / 5),
-                ("NS", 2. / 20),
+                ("WE", rho*1. / 5),
+                ("EW", rho*1. / 5),
+                ("NS", rho*2. / 20),
                 ("length", N // 2)
             )),
             OrderedDict((
-                ("WE", 3. / 10),
-                ("EW", 3. / 10),
-                ("NS", 3. / 10),
+                ("WE", rho*1. / 10),
+                ("EW", rho*1. / 10),
+                ("NS", rho*1. / 10),
+                ("length", N // 2)
+            ))
+        ]'''
+        queue_params = [OrderedDict(
+            (
+                ("WE", rho*2. / 5),
+                ("EW", rho*2. / 5),
+                ("NS", rho*2. / 20),
+                ("length", N // 2)
+            )),
+            OrderedDict((
+                ("WE", rho*3. / 10),
+                ("EW", rho*3. / 10),
+                ("NS", rho*3. / 10),
                 ("length", N // 2)
             ))
         ]
@@ -152,7 +184,6 @@ def generate_routefile(N, intersection):
         routes = multi_routes
         
     with open(route_file, "w") as f:
-        print(queue_params)
         print("<routes>{}{}".format(vehicles, routes), file=f)
         vehNr = 0
         x = 0
@@ -165,6 +196,7 @@ def generate_routefile(N, intersection):
                         vehNr += 1
             x += queue_segment["length"]
         print("</routes>", file=f)
+    return queue_params
 
 # The program looks like this
 #    <tlLogic id="0" type="static" programID="0" offset="0">
@@ -176,9 +208,10 @@ def generate_routefile(N, intersection):
 #    </tlLogic>
 
 
-def cumHaltingNumber():
+def cumHaltingNumber(tls_id):
     cum_halt_num = 0
-    for det_id in la.getIDList():
+    for lane_id in tl.getControlledLanes(tls_id):
+        det_id = la_mapping[lane_id]
         cum_halt_num += la.getLastStepHaltingNumber(det_id)
     return cum_halt_num
 
@@ -259,6 +292,35 @@ def getDTSE(tls_id):
     DTSE_spd = torch.from_numpy(DTSE_spd).unsqueeze(0).unsqueeze(0).float()
     return DTSE_pos, DTSE_spd, signal_state
  
+def getMARLState(tls_id):
+    P, V, L = getDTSE(tls_id)
+
+    # traffic light ids of lights that connect to the tls_id light
+    # Here we assume the ids are all integer
+    tls_id1 = str((int(tls_id) + 1) % 4)
+    tls_id2 = str((int(tls_id) - 1) % 4)
+
+ 
+    if ma == 1:
+        phase1 = tl.getPhase(tls_id1) // 2
+        phase2 = tl.getPhase(tls_id2) // 2
+        
+        #print('MARL tls ids & phases:', tls_id, tls_id1, tls_id2, phase1, phase2)
+        other_signal_state1 = torch.zeros(1, A).float()
+        other_signal_state1[0][phase1] = 1
+
+        other_signal_state2 = torch.zeros(1, A).float()
+        other_signal_state2[0][phase2] = 1
+    elif ma == 2:
+        state_info1 = cumHaltingNumber(tls_id1)
+        state_info2 = cumHaltingNumber(tls_id2)
+
+        other_signal_state1 = torch.Tensor([[state_info1]])
+        other_signal_state2 = torch.Tensor([[state_info2]])
+
+    L = torch.cat((L, other_signal_state1, other_signal_state2), 1)
+    return P, V, L
+
 def numVehicles():
     vehicles = 0
     for l, det_id in enumerate(la.getIDList()):
@@ -269,7 +331,7 @@ def getReward(tls_id):
     #return -getTimeInQueue()
     return -getCumulativeDelay(tls_id)
     # Try normalizing the reward and using queue length again
-    #return -cumHaltingNumber()
+    #return -cumHaltingNumber(tls_id)
 
 def stateMap(EW, NS, phase):
     # What if we decrease the state space size:
@@ -372,7 +434,7 @@ def myfixed(greentime, yellowtime):
                 r = getReward(tls_id)
                 rewards_t.append(r)
 
-def run(models, state_fn, action_time = 12, learn=True):
+def run(models, state_fn, action_time = 12, learn=True, writer=None):
     print("File beginning", flush=True)
     
     tls_ids = tl.getIDList()
@@ -430,6 +492,8 @@ def run(models, state_fn, action_time = 12, learn=True):
                 continue
 
             r[t] = getReward(tls_id)
+            if writer:
+                writer.add_scalar('reward', r[t], sim.getCurrentTime())
             rewards_t.append(r)
  
             db("reward:", r)
@@ -439,13 +503,21 @@ def run(models, state_fn, action_time = 12, learn=True):
                 models[t].update(s[t], a[t], r[t], s_[t], alpha)
             s[t] = s_[t]
 
-def save_output(fname, episode=None):
+def save_rewards(fname, episode=None):
     if episode is not None:
         np.savetxt('{}_episode{}_rewards'.format(args.saverewards, episode), rewards_t)
         np.savetxt('{}_episode{}_visits'.format(args.saverewards, episode), visits)
     else:
         np.savetxt('{}_rewards'.format(args.saverewards), rewards_t)
         np.savetxt('{}_visits'.format(args.saverewards), visits)
+
+def save_simulation_params(gp, args, queue_params):
+    simulation_params["global_params"] = gp
+    simulation_params["queue_params"] = queue_params
+    simulation_params["args"] = args
+
+    with open("simulation_params", "w") as f:
+        f.write(str(simulation_params))
 
 def get_arguments():
     argParser = argparse.ArgumentParser()
@@ -454,11 +526,12 @@ def get_arguments():
     argParser.add_argument("--saverewards")
     argParser.add_argument("--loadfromfile")
     argParser.add_argument("--savetofile")
-    argParser.add_argument("--method", choices=["f", "ql", "dql"],
-                        help="Choose type of traffic controller. f is fixed, ql is tabular ql, dql is deep q learning")
+    argParser.add_argument("--method", choices=["f", "ql", "dql", "marl"],
+                        help="Choose type of traffic controller. f is fixed, ql is tabular ql, dql is deep q learning, marl is multi-agent rl")
     argParser.add_argument("--intersection", choices=["s", "m"],
                         default="s", help="Choose type of intersection to simulate. s is single m is multiple")
     argParser.add_argument("--epsilon", type=float, default=0.0)
+    argParser.add_argument("--rho", type=float, default=1.0)
     argParser.add_argument("--episodes", type=int)
 
     args = argParser.parse_args()
@@ -488,10 +561,14 @@ if __name__ == "__main__":
     if args.method == 'f':
         # this is the normal way of using traci. sumo is started as a
         # subprocess and then the python script connects and runs
-        min_green_time = 10
-        max_green_time = 35
-        #min_green_time = 40
+        #min_green_time = 10
         #max_green_time = 40
+
+        #min_green_time = 30
+        #max_green_time = 50
+
+        min_green_time = 40
+        max_green_time = 40
         inc = 5
         for gt in range(min_green_time, max_green_time+1, inc):
             _gt = gt
@@ -499,15 +576,15 @@ if __name__ == "__main__":
 
             traci.start([sumoBinary, "-c", sumo_cfgfile,
                                      "--tripinfo-output", "{}green={}_tripinfo.xml".format(args.method, _gt),
-                                     "--error-log", "errors"])
+                                     "time-to-teleport", str(-1),
+                                     "--error-log", "errors"]) # -1 for time-to-teleport means no teleport
             generate_lanearea_mapping() 
 
             print('Used fixed controller with cycle ({0},{1},{0},{1})'.format(_gt, 6))
             myfixed(_gt, 6)
             if args.saverewards:
-                save_output(args.saverewards, _gt)
+                save_rewards(args.saverewards, _gt)
     else:    
-
         if args.method == 'ql':
             print('Using epsilon-greedy Qlearning controller')
             models = []
@@ -515,25 +592,33 @@ if __name__ == "__main__":
                 models.append(QLC(S, A, epsilon=args.epsilon, gamma=gamma, anneal=True, anneal_steps=N//36, loadQ=args.loadfromfile))
             state_fn = getState
 
-        elif args.method == 'dql':
-            print('Using Deep q-learning traffic controller')
-            # this is the normal way of using traci. sumo is started as a
-            # subprocess and then the python script connects and runs
+        elif args.method == 'dql' or args.method== 'marl':
+            # Init tensorboard summary writer
+
+            if args.method == 'dql':
+                print('Using epsilon-greedy q-learning traffic controller')
+                multiagent = 0
+                state_fn = getDTSE
+            else:
+                print('Using epsilon-greedy multi-agent reinforcement learning traffic controller')
+                multiagent = ma
+                state_fn= getMARLState
+
             models = []
             for i in range(num_models):
-                models.append(DTC(c * num_cells * NUM_LANES * 4, A, epsilon=args.epsilon, capacity=100000, batch_size=32, gamma=0.9, beta=0.1))
-
+                models.append(DTC(c * num_cells * NUM_LANES * 4, A, epsilon=args.epsilon, capacity=100000, batch_size=32, gamma=gamma, beta=beta, multiagent=multiagent))
+                #writer.add_graph(models[i].model, [Variable(torch.rand(1, 1, 4, 25)), Variable(torch.rand(1, 1, 4, 25)), Variable(torch.rand(1, 2))])
                 if args.loadfromfile is not None:
-                    models[i].load_params(args.loadfromfile + "m" + i)
+                    models[i].load_params(args.loadfromfile + "m" + str(i))
 
-            state_fn = getDTSE
-            
-            # Init tensorboard summary writer
-            writer = SummaryWriter()
+
+        queue_params = generate_routefile(N, intersection=args.intersection, rho=args.rho)
+        save_simulation_params(global_params, args, queue_params)
 
         for i in range(args.episodes):
+            writer = SummaryWriter()
             # Generate a different route file every iteration
-            generate_routefile(N, intersection=args.intersection)
+            generate_routefile(N, intersection=args.intersection, rho=args.rho)
             visits = []
             rewards_t = []
 
@@ -543,14 +628,15 @@ if __name__ == "__main__":
 
             traci.start([sumoBinary, "-c", sumo_cfgfile,
                                   "--tripinfo-output", tripinfo_xml,
+                                  "--time-to-teleport", str(-1),
                                   "--error-log", "errors"])
 
             generate_lanearea_mapping() 
-            run(models, state_fn, learn=True)
+            run(models, state_fn, learn=False, writer=writer)
             if args.savetofile:
-                for model in models:
-                    model.save_params(save_fname)
+                for j, model in enumerate(models):
+                    model.save_params('{}m{}'.format(save_fname, j))
             if args.saverewards:
-                save_output(args.saverewards, i)
+                save_rewards(args.saverewards, i)
 
     exit(0)

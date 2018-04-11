@@ -48,7 +48,7 @@ class ReplayMemory():
 # Deep traffic controller
 class DNN(nn.Module):
     ''' Deep traffic controller '''
-    def __init__(self, input_size, A, epsilon=0.1, batch_size=32):
+    def __init__(self, input_size, A, epsilon=0.1, batch_size=32, multiagent=0):
         # Define conv and fully connected layers
         super(DNN, self).__init__()
         #TODO: try diff kernel sizes and strides
@@ -69,7 +69,17 @@ class DNN(nn.Module):
         self.bn_spd2 = nn.BatchNorm2d(32)
         
         # Fully connected layers
-        self.fc3 = nn.Linear(2*32*1*6+A, 128) # Input size depends on size of the input to the first layer
+        if multiagent == 0:
+            self.fc3 = nn.Linear(2*32*1*6+A, 128) # Input size depends on size of the input to the first layer
+            print('Multiagent 0')
+        elif multiagent == 1:
+            self.fc3 = nn.Linear(2*32*1*6+3*A, 128) # num subnetworks * num filters * height final conv output * width final conv output + num poss signal states + 2 other state signals
+            print('Multiagent 1')
+        elif multiagent == 2:
+            self.fc3 = nn.Linear(2*32*1*6+A+2, 128)
+            print('Multiagent 2')
+
+
         self.fc4 = nn.Linear(128, 64) 
         self.out = nn.Linear(64, A) # |A|, size of action space
 
@@ -126,8 +136,8 @@ class DTC:
     
     def update(self, s, a, r, s_, *args, **kwargs):
         # push memory
-        a = torch.LongTensor([[a]])
-        r = torch.Tensor([r])
+        a = LongTensor([[a]])
+        r = Tensor([r])
         self.memory.push(s, a, r, s_)
         optimize_model(self.model, self.target, self.memory, self.gamma, self.beta)
 
