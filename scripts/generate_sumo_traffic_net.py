@@ -1,8 +1,10 @@
 import geojson
 from geoql import geoql
+from geopy.distance import vincenty
 import geoleaflet
 import xml.etree.cElementTree as ET
 import numpy as np
+import subprocess
 
 data_dir = '../datasets/geographical/'
 
@@ -50,7 +52,7 @@ def to_sumo_net(V, E):
         node_ids[tuple(v['coordinates'])] = i
 
         x, y = v['coordinates']
-        node = create_xml_node(i, str(x), str(y))
+        node = create_xml_node(i, str(x), str(y), node_type="traffic_light")
         nodes_root.append(node)
         k += 1
 
@@ -104,7 +106,19 @@ def to_sumo_net(V, E):
 
     return nodes, edges
 
-def main():
+def convert_to_meters(origin, p):
+    """Converts lat lon to relative point in meters from origin """
+    lon1, lat1 = origin
+    lon2, lat2 = p
+
+    lon = lon2 - lon1
+    lat = lat2 - lat1
+    # In order to keep edges straight we use linear approximation of distance
+    dist = np.sqrt(lon**2 + lat**2) * 111111 #vincenty((lat1, lon1), (lat2, lon2)).meters
+    ang = np.arctan(lat / lon)
+    return [dist * np.cos(ang), dist * np.sin(ang)] 
+
+def main(node_fname, edge_fname):
     # We take a small area of Boston bounded by the p1, p2, p3, & p4 (corresponding roughly to the area bounded by fenway, the Charles River, and Boston Commons)
     # geoql requires longitude then latitude
     p1 = [-71.090084, 42.351659]
@@ -137,32 +151,19 @@ def main():
     # Also enlarge the distance between coordinates
     V, E = [], []
 
-    distances = []
-    for feature in g['features']:
-        if feature['type'] == 'Feature':
-            coords = feature['geometry']['coordinates']
-            for i in range(1, len(coords)):
-                x1, y1 = coords[i]
-                x2, y2 = coords[i-1]
-                dist = ((x2 - x1)**2 + (y2 - y1)**2)**0.5
-                if dist > 0:
-                    distances.append(dist)
-
-
-    scale = 100 / min(distances)
-    print(scale)
+    center = p1
 
     for feature in g['features']:
         if feature['type'] == 'Feature':
             coords = feature['geometry']['coordinates']
-            for i, coord in enumerate(coords):
-
-                coords[i] = (coord[0] * scale, coord[1] * scale)
-                
+            #for i, coord in enumerate(coords):
+            #    coords[i] = convert_to_meters(center, coords[i])
+             
+            #E.append(feature)
+            feature['geometry']['coordinates'] = [convert_to_meters(center, coords[0]), convert_to_meters(center, coords[-1])]
             E.append(feature)
         elif feature['type'] == 'Point':
-            coords = feature['coordinates']
-            feature['coordinates'] = (coords[0] * scale, coords[1] * scale)
+            feature['coordinates'] = convert_to_meters(center, feature['coordinates'])
             V.append(feature)
         else:
             print('Invalid feature type {} in graph'.format(feature['type']))
@@ -170,8 +171,12 @@ def main():
     # Convert to a sumo representation
     nodes, edges = to_sumo_net(V, E)
 
-    nodes.write('../sumo_files/traffic_ml.nod.xml')
-    edges.write('../sumo_files/traffic_ml.edg.xml')
+    nodes.write(node_fname)
+    edges.write(edge_fname)
 
 if __name__ == '__main__':
-    main()
+    node_file = '../sumo_files/traffic_ml_meters.nod.xml'
+    edge_file = '../sumo_files/traffic_ml_meters.edg.xml' 
+    output_file = '../sumo_files/traffic_ml_meters.net.xml'
+    distances = main(node_file, edge_file)
+    subprocess.run(["netconvert", "--node-files="+node_file, "--edge-files="+edge_file, "--output-file="+output_file], check=True)

@@ -3,3 +3,4 @@ geoql
 geojson
 geoleaflet
 orderedset
+geopy
